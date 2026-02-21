@@ -1,7 +1,7 @@
 //for now we whitelist only the low consumption models
 const LOW_CONSUMPTION_MODELS = [
-    'gpt-4o-mini',
-    'gpt-3.5-turbo',
+    { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
+    { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo' },
 ];
 
 class OpenAIAPI {
@@ -12,8 +12,8 @@ class OpenAIAPI {
         });
         const data = await response.json();
         return data.data
-            .filter(m => LOW_CONSUMPTION_MODELS.includes(m.id))
-            .map(m => ({ value: m.id, label: m.id }))
+            .filter(m => LOW_CONSUMPTION_MODELS.some(lm => lm.value === m.id))
+            .map(m => LOW_CONSUMPTION_MODELS.find(lm => lm.value === m.id))
             .sort((a, b) => a.label.localeCompare(b.label));
     }
 
@@ -22,7 +22,7 @@ class OpenAIAPI {
 
         if (!apiKey) {
             console.error('Error: OPENAI_API_KEY is not set');
-            return 'Server configuration error: missing API key.';
+            throw new Error('Missing API key.');
         }
 
         const endpoint = 'https://api.openai.com/v1/chat/completions';
@@ -44,25 +44,23 @@ class OpenAIAPI {
             if (!response.ok) {
                 const errorData = await response.json();
                 console.error('OpenAI API error:', errorData);
-                return 'Sorry, there was an error contacting the AI service.';
+                throw new Error('Failed to get response from API.');
             }
 
             const responseData = await response.json();
-
-            //console.log('Response from OpenAI API:', responseData.choices[0].message);
 
             if (responseData.choices && responseData.choices.length > 0 && responseData.choices[0].message) {
                 return responseData.choices[0].message.content;
             } else {
                 console.error('Error: No valid response from OpenAI API');
-                return "Sorry, I couldn't understand that.";
+                throw new Error('Failed to get response from API.');
             }
 
         } catch (error) {
             console.error('Network or fetch error:', error.message);
-            return 'Sorry, I was unable to reach the AI service. Please try again.';
+            throw new Error('Failed to get response from API.');
         }
     }
 }
 
-module.exports = { OpenAIAPI };
+module.exports = { OpenAIAPI, OPENAI_MODELS: LOW_CONSUMPTION_MODELS.map(m => m.value) };

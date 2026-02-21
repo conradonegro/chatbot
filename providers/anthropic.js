@@ -1,9 +1,11 @@
+const LOW_CONSUMPTION_MODELS = [
+    { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5' },
+];
+
 class AnthropicAPI {
     static async getModels() {
         // Anthropic has no public models endpoint, return hardcoded whitelist of low consumption models only (for now)
-        return [
-            { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5' }
-        ];
+        return LOW_CONSUMPTION_MODELS;
     }
 
     static async generateResponse(userMessage, conversationHistory = [], model) {
@@ -11,7 +13,7 @@ class AnthropicAPI {
 
         if (!apiKey) {
             console.error('Error: ANTHROPIC_API_KEY is not set');
-            return 'Server configuration error: missing API key.';
+            throw new Error('Missing API key.');
         }
 
         try {
@@ -32,7 +34,7 @@ class AnthropicAPI {
             if (!response.ok) {
                 const errorData = await response.json();
                 console.error('Anthropic API error:', errorData);
-                return 'Sorry, there was an error contacting the AI service.';
+            throw new Error('Failed to get response from API.');
             }
 
             const responseData = await response.json();
@@ -40,9 +42,9 @@ class AnthropicAPI {
 
         } catch (error) {
             console.error('Network or fetch error:', error.message);
-            return 'Sorry, I was unable to reach the AI service. Please try again.';
+            throw new Error('Failed to get response from API.');
         }
     }
 }
 
-module.exports = { AnthropicAPI };
+module.exports = { AnthropicAPI, ANTHROPIC_MODELS: LOW_CONSUMPTION_MODELS.map(m => m.value) };

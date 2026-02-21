@@ -1,25 +1,61 @@
-//html elements to use
+// DOM element references
 const chatLog = document.getElementById('chat-log');
 const userInput = document.getElementById('user-input');
 const sendButton = document.getElementById('send-button');
 const providerSelect = document.getElementById('provider-select');
 const modelSelect = document.getElementById('model-select');
 
-//conversation history stored in a neutral format
-//{role: 'user' | 'assistant', content: string}
-let conversationHistory = [];
+// Session Management
+let sessionId = null;
 
-//load models of selected provider
+/**
+ * Displays an error message in the model select dropdown.
+ * Replaces all options with a single "Error loading models" option.
+ * @returns {void}
+ */
+const setModelError = () => { modelSelect.innerHTML = '<option>Error loading models</option>'; };
+
+/**
+ * Initializes a new chat session by requesting a session ID from the server.
+ * - Sends a POST request to `/getSession`
+ * - Sets the global `sessionId` on success
+ * - Logs an error if the session initialization fails
+ * @returns {Promise<void>}
+ */
+async function initSession() {
+    try {
+        const res = await fetch('/getSession', { method: 'POST' });
+        const data = await res.json();
+        if (!data.success) {
+            console.error('Failed to initialize session:', data.error);
+            return;
+        }
+        sessionId = data.data.sessionId;
+    } catch (error) {
+        console.error('Failed to initialize session:', error.message);
+    }
+}
+
+/**
+ * Loads available models for the selected AI provider and updates the model dropdown.
+ * - Disables the model select and shows a loading message while fetching
+ * - Populates the dropdown with fetched models on success
+ * - Displays an error message in the dropdown if fetching fails
+ * @returns {void}
+ */
 function onProviderChange() {
-    const provider = providerSelect.value;
     modelSelect.disabled = true;
     modelSelect.innerHTML = '<option>Loading...</option>';
 
-    fetch(`/getModels?provider=${provider}`)
+    fetch(`/getModels?provider=${providerSelect.value}`)
         .then(res => res.json())
         .then(data => {
+            if (!data.success) {
+                setModelError();
+                return;
+            }
             modelSelect.innerHTML = '';
-            data.models.forEach(model => {
+            data.data.models.forEach(model => {
                 const option = document.createElement('option');
                 option.value = model.value;
                 option.textContent = model.label;
@@ -28,22 +64,37 @@ function onProviderChange() {
         })
         .catch(err => {
             console.error('Error loading models:', err);
-            modelSelect.innerHTML = '<option>Error loading models</option>';
+            setModelError();
         })
         .finally(() => {
             modelSelect.disabled = false;
         });
 }
 
-//init model list
-onProviderChange();
-
-//send message when pressing Enter
+// EventListener to send message when pressing Enter
 userInput.addEventListener('keydown', function (event) {
     if (event.key === 'Enter') sendMessage();
 });
 
-//displays message and gets chatbot response
+/**
+ * Initializes the chat interface on page load.
+ * - Starts a new session by calling `initSession`
+ * - Sets initial provider and model state via `onProviderChange`
+ * @returns {Promise<void>}
+ */
+async function init() {
+    await initSession();
+    onProviderChange();
+}
+
+/**
+ * Sends the user’s message to the chat interface and triggers the chatbot response.
+ * - Reads and trims input
+ * - Displays the user’s message in the chat
+ * - Clears the input field
+ * - Calls `getChatbotResponse` to fetch the AI reply
+ * @returns {void}
+ */
 function sendMessage() {
     const message = userInput.value.trim();
     if (!message) return;
@@ -53,24 +104,36 @@ function sendMessage() {
     getChatbotResponse(message);
 }
 
-//disable/enable controls while waiting for response or not
+/**
+ * Toggles UI controls while waiting for a chatbot response.
+ * Disables or enables input and send button, and updates button text
+ * based on the loading state.
+ * @param {boolean} isLoading - Whether a request is in progress.
+ * @returns {void}
+ */
 function setLoading(isLoading) {
     sendButton.disabled = isLoading;
     sendButton.textContent = isLoading ? 'Sending...' : 'Send';
     userInput.disabled = isLoading;
 }
 
-//displays messages in the chat
+/**
+ * Renders a chat message in the UI.
+ * Creates a message bubble, adds provider/model metadata for chatbot messages,
+ * appends it to the chat log, and scrolls to the latest message.
+ * @param {'user' | 'chatbot'} sender - Message sender type.
+ * @param {string} message - Message text to display.
+ * @returns {void}
+ */
 function displayMessage(sender, message) {
-    //message elements
+    //build new message bubble
     const messageElement = document.createElement('div');
     messageElement.classList.add('message', sender);
     const messageParagraph = document.createElement('p');
     messageParagraph.innerText = message;
-
-    //append new message elements
     messageElement.appendChild(messageParagraph);
-    //add provider & model metadata only for chatbot messages
+
+    //add provider & model metadata for chatbot messages
     if (sender === 'chatbot') {
         const meta = document.createElement('span');
         meta.classList.add('message-meta');
@@ -79,36 +142,40 @@ function displayMessage(sender, message) {
     }
     chatLog.appendChild(messageElement);
 
-    //auto-scroll to latest message
     chatLog.scrollTop = chatLog.scrollHeight;
 }
 
-//gets response from the AI provider's model
+/**
+ * Sends the user message to the server and displays the chatbot response.
+ * Includes provider, model, and session ID in the request.
+ * Initiates an async fetch request and handles response and errors internally.
+ * @param {string} userMessage - The user's message to send to the AI.
+ * @returns {void}
+ */
 function getChatbotResponse(userMessage) {
     setLoading(true);
-
-    //add user message to history
-    conversationHistory.push({ role: 'user', content: userMessage });
-
-    const provider = providerSelect.value;
-    const model = modelSelect.value;
 
     fetch('/getChatbotResponse', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userMessage, provider, model, conversationHistory }),
+        body: JSON.stringify({ userMessage, provider: providerSelect.value, model: modelSelect.value, sessionId }),
     })
     .then(response => response.json())
     .then(data => {
-        displayMessage('chatbot', data.chatbotResponse);
-        //add AI response to history
-        conversationHistory.push({ role: 'assistant', content: data.chatbotResponse });
+        if (!data.success) {
+            displayMessage('chatbot', `Error: ${data.error}`);
+            return;
+        }
+        sessionId = data.data.sessionId;
+        displayMessage('chatbot', data.data.chatbotResponse);
     })
     .catch(error => {
         console.error('Error:', error);
-        displayMessage('chatbot', 'Sorry, something went wrong. Please try again.');
+        displayMessage('chatbot', 'Error: Unable to reach the server. Please try again.');
     })
     .finally(() => {
         setLoading(false);
     });
 }
+
+init();

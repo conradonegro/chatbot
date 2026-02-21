@@ -1,11 +1,13 @@
+const LOW_CONSUMPTION_MODELS = [
+    { value: 'grok-3-mini', label: 'Grok 2 Mini' },
+    { value: 'grok-4-fast-non-reasoning', label: 'Grok 4 Fast Non-Reasoning' },
+    { value: 'grok-4-1-fast-non-reasoning', label: 'Grok 4.1 Fast Non-Reasoning' },
+];
+
 class XAI_API {
     static async getModels() {
-        // X has no public models endpoint, return hardcoded whitelist
-        return [
-            { value: 'grok-3-mini', label: 'Grok 3 Mini' },
-            { value: 'grok-4-fast-non-reasoning', label: 'Grok 4 Fast Non-Reasoning' },
-            { value: 'grok-4-1-fast-non-reasoning', label: 'Grok 4.1 Fast Non-Reasoning' },
-        ];
+        // XAI has no public models endpoint, return hardcoded whitelist of low consumption models only (for now)
+        return LOW_CONSUMPTION_MODELS;
     }
 
     static async generateResponse(userMessage, conversationHistory = [], model) {
@@ -13,7 +15,7 @@ class XAI_API {
 
         if (!apiKey) {
             console.error('Error: XAI_API_KEY is not set');
-            return 'Server configuration error: missing API key.';
+            throw new Error('Missing API key.');
         }
 
         try {
@@ -33,7 +35,7 @@ class XAI_API {
             if (!response.ok) {
                 const errorData = await response.json();
                 console.error('X AI API error:', errorData);
-                return 'Sorry, there was an error contacting the AI service.';
+            throw new Error('Failed to get response from API.');
             }
 
             const responseData = await response.json();
@@ -41,9 +43,9 @@ class XAI_API {
 
         } catch (error) {
             console.error('Network or fetch error:', error.message);
-            return 'Sorry, I was unable to reach the AI service. Please try again.';
+            throw new Error('Failed to get response from API.');
         }
     }
 }
 
-module.exports = { XAI_API };
+module.exports = { XAI_API, XAI_MODELS: LOW_CONSUMPTION_MODELS.map(m => m.value) };
