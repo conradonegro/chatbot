@@ -1,3 +1,6 @@
+const { fetchWithErrorHandling } = require('./utils');
+
+//for now we whitelist only the low consumption models
 const LOW_CONSUMPTION_MODELS = [
     { value: 'grok-3-mini', label: 'Grok 2 Mini' },
     { value: 'grok-4-fast-non-reasoning', label: 'Grok 4 Fast Non-Reasoning' },
@@ -18,33 +21,21 @@ class XAI_API {
             throw new Error('Missing API key.');
         }
 
-        try {
-            const response = await fetch('https://api.x.ai/v1/chat/completions', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${apiKey}`,
-                },
-                body: JSON.stringify({
-                    model,
-                    max_tokens: 500,
-                    messages: conversationHistory.concat([{ role: 'user', content: userMessage }]),
-                }),
-            });
+        const response = await fetchWithErrorHandling('https://api.x.ai/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify({
+                model,
+                max_tokens: 500,
+                messages: conversationHistory.concat([{ role: 'user', content: userMessage }]),
+            }),
+        });
 
-            if (!response.ok) {
-                const errorData = await response.json();
-                console.error('X AI API error:', errorData);
-            throw new Error('Failed to get response from API.');
-            }
-
-            const responseData = await response.json();
-            return responseData.choices[0].message.content;
-
-        } catch (error) {
-            console.error('Network or fetch error:', error.message);
-            throw new Error('Failed to get response from API.');
-        }
+        if (!response.choices?.[0]?.message) throw new Error('Failed to get response from API.');
+        return response.choices[0].message.content;
     }
 }
 

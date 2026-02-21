@@ -8,33 +8,17 @@ const modelSelect = document.getElementById('model-select');
 // Session Management
 let sessionId = null;
 
+// EventListener to send message when pressing Enter
+userInput.addEventListener('keydown', function (event) {
+    if (event.key === 'Enter') sendMessage();
+});
+
 /**
  * Displays an error message in the model select dropdown.
  * Replaces all options with a single "Error loading models" option.
  * @returns {void}
  */
 const setModelError = () => { modelSelect.innerHTML = '<option>Error loading models</option>'; };
-
-/**
- * Initializes a new chat session by requesting a session ID from the server.
- * - Sends a POST request to `/getSession`
- * - Sets the global `sessionId` on success
- * - Logs an error if the session initialization fails
- * @returns {Promise<void>}
- */
-async function initSession() {
-    try {
-        const res = await fetch('/getSession', { method: 'POST' });
-        const data = await res.json();
-        if (!data.success) {
-            console.error('Failed to initialize session:', data.error);
-            return;
-        }
-        sessionId = data.data.sessionId;
-    } catch (error) {
-        console.error('Failed to initialize session:', error.message);
-    }
-}
 
 /**
  * Loads available models for the selected AI provider and updates the model dropdown.
@@ -71,20 +55,82 @@ function onProviderChange() {
         });
 }
 
-// EventListener to send message when pressing Enter
-userInput.addEventListener('keydown', function (event) {
-    if (event.key === 'Enter') sendMessage();
-});
+/**
+ * Checks availability of AI providers and updates the provider dropdown.
+ * - Fetches provider status from the server
+ * - Disables providers without API keys and marks them in the UI
+ * - Switches to the first available provider if the current one is unavailable
+ * - Logs errors if the status request fails
+ * @returns {Promise<void>}
+ */
+async function checkProviderStatus() {
+    try {
+        const res = await fetch('/getProviderStatus');
+        const data = await res.json();
+        if (!data.success) return;
+
+        const status = data.data.status;
+        const options = Array.from(providerSelect.options);
+
+        options.forEach(option => {
+            if (!status[option.value]) {
+                option.disabled = true;
+                option.text = `${option.text} (no API key)`;
+            }
+        });
+
+        // If currently selected provider is disabled, switch to first available
+        if (!status[providerSelect.value]) {
+            const firstAvailable = options.find(o => !o.disabled);
+            if (firstAvailable) {
+                providerSelect.value = firstAvailable.value;
+            }
+        }
+    } catch (error) {
+        console.error('Failed to fetch provider status:', error.message);
+    }
+}
+
+/**
+ * Initializes a new chat session by requesting a session ID from the server.
+ * - Sends a POST request to `/getSession`
+ * - Sets the global `sessionId` on success
+ * - Logs an error if the session initialization fails
+ * @returns {Promise<void>}
+ */
+async function initSession() {
+    try {
+        const res = await fetch('/getSession', { method: 'POST' });
+        const data = await res.json();
+        if (!data.success) {
+            console.error('Failed to initialize session:', data.error);
+            userInput.placeholder = data.error;
+            userInput.disabled = true;
+            sendButton.disabled = true;
+            return;
+        }
+        sessionId = data.data.sessionId;
+    } catch (error) {
+        console.error('Failed to initialize session:', error.message);
+        userInput.placeholder = 'Unable to reach the server. Please refresh.';
+        userInput.disabled = true;
+        sendButton.disabled = true;
+    }
+}
 
 /**
  * Initializes the chat interface on page load.
- * - Starts a new session by calling `initSession`
- * - Sets initial provider and model state via `onProviderChange`
+ * - Creates a chat session via `initSession`
+ * - Checks provider availability with `checkProviderStatus`
+ * - Loads models for the selected provider
+ * - Sets focus to the user input field
  * @returns {Promise<void>}
  */
 async function init() {
     await initSession();
+    await checkProviderStatus();
     onProviderChange();
+    userInput.focus();
 }
 
 /**
@@ -98,6 +144,10 @@ async function init() {
 function sendMessage() {
     const message = userInput.value.trim();
     if (!message) return;
+    if (!sessionId) {
+        displayMessage('chatbot', 'Error: No active session. Please refresh the page.');
+        return;
+    }
 
     displayMessage('user', message);
     userInput.value = '';
@@ -137,8 +187,13 @@ function displayMessage(sender, message) {
     if (sender === 'chatbot') {
         const meta = document.createElement('span');
         meta.classList.add('message-meta');
-        meta.innerText = `${providerSelect.options[providerSelect.selectedIndex].text} · ${modelSelect.options[modelSelect.selectedIndex].text}`;
-        messageElement.appendChild(meta);
+        //in some cases, select lists can be loading or in error states (rate limits)
+        const providerText = providerSelect.selectedIndex >= 0 ? providerSelect.options[providerSelect.selectedIndex].text : '';
+        const modelText = modelSelect.selectedIndex >= 0 ? modelSelect.options[modelSelect.selectedIndex].text : '';
+        if (providerText && modelText) {
+            meta.innerText = `${providerText} · ${modelText}`;
+            messageElement.appendChild(meta);
+        }
     }
     chatLog.appendChild(messageElement);
 
@@ -175,6 +230,7 @@ function getChatbotResponse(userMessage) {
     })
     .finally(() => {
         setLoading(false);
+        userInput.focus();
     });
 }
 

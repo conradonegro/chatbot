@@ -3,11 +3,26 @@ require('dotenv').config();
 const path = require('path');
 const crypto = require('crypto');
 const express = require('express');
+const rateLimit = require('express-rate-limit');
 const sanitizeHtml = require('sanitize-html');
 const { OpenAIAPI, OPENAI_MODELS } = require('./providers/openai');
 const { AnthropicAPI, ANTHROPIC_MODELS } = require('./providers/anthropic');
 const { GoogleAPI, GOOGLE_MODELS } = require('./providers/google');
 const { XAI_API, XAI_MODELS } = require('./providers/xai');
+
+/* ENVIRONMENT VALIDATION */
+const REQUIRED_ENV_VARS = [
+    'OPENAI_API_KEY',
+    'ANTHROPIC_API_KEY',
+    'GOOGLE_API_KEY',
+    'XAI_API_KEY',
+];
+
+const missingEnvVars = REQUIRED_ENV_VARS.filter(key => !process.env[key]);
+if (missingEnvVars.length > 0) {
+    console.warn(`Warning: Missing environment variables: ${missingEnvVars.join(', ')}`);
+    console.warn('Providers with missing keys will fail when called.');
+}
 
 /* CONSTANTS */
 const MAX_MESSAGE_LENGTH = 2000;
@@ -30,6 +45,25 @@ const VALID_MODELS = {
     google: GOOGLE_MODELS,
     x: XAI_MODELS,
 };
+
+/* RATE LIMITERS */
+const sessionLimiter = rateLimit({
+    windowMs: 60 * 1000, // 1 minute
+    max: 5, // max 5 sessions per minute per IP
+
+    message: { success: false, error: 'Too many sessions created. Please wait before trying again.' },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
+const chatLimiter = rateLimit({
+    windowMs: 60 * 1000, // 1 minute
+    max: 10, // max 30 messages per minute per IP
+
+    message: { success: false, error: 'Too many messages sent. Please wait before trying again.' },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
 
 /* STATE */
 const sessionHistories = new Map();
@@ -92,7 +126,7 @@ function sanitizeInput(text) {
 }
 
 // ROUTE /getSession: Initialize the session
-app.post('/getSession', (req, res) => {
+app.post('/getSession', sessionLimiter, (req, res) => {
     try {
         const sessionId = createSession();
         ok(res, { sessionId });
@@ -108,7 +142,7 @@ app.get('/', (req, res) => {
 });
 
 // ROUTE /getChatbotResponse: Call API and get model's response
-app.post('/getChatbotResponse', async (req, res) => {
+app.post('/getChatbotResponse', chatLimiter, async (req, res) => {
     try {
         //get provider, model and sessionId from the client
         const { provider, model, sessionId } = req.body;
@@ -163,6 +197,17 @@ app.get('/getModels', async (req, res) => {
         console.error('Error fetching models:', error.message);
         fail(res, 500, 'Failed to fetch models.');
     }
+});
+
+// ROUTE /getProviderStatus: Returns which providers have API keys configured
+app.get('/getProviderStatus', (req, res) => {
+    const status = {
+        openai: !!process.env.OPENAI_API_KEY,
+        anthropic: !!process.env.ANTHROPIC_API_KEY,
+        google: !!process.env.GOOGLE_API_KEY,
+        x: !!process.env.XAI_API_KEY,
+    };
+    ok(res, { status });
 });
 
 /* START SERVER */

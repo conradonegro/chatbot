@@ -1,3 +1,6 @@
+const { fetchWithErrorHandling } = require('./utils');
+
+//for now we whitelist only the low consumption models
 const LOW_CONSUMPTION_MODELS = [
     { value: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite' },
     { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
@@ -6,18 +9,21 @@ const LOW_CONSUMPTION_MODELS = [
 
 class GoogleAPI {
     static async getModels() {
-        const response = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models?key=${process.env.GOOGLE_API_KEY}`
+        const apiKey = process.env.GOOGLE_API_KEY;
+        if (!apiKey) {
+            console.error('Error: GOOGLE_API_KEY is not set');
+            throw new Error('Missing API key.');
+        }
+        const response = await fetchWithErrorHandling(
+            `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`
         );
-        const data = await response.json();
-        return data.models
+        return response.models
             .filter(m => LOW_CONSUMPTION_MODELS.some(lm => lm.value === m.name.replace('models/', '')))
             .map(m => LOW_CONSUMPTION_MODELS.find(lm => lm.value === m.name.replace('models/', '')));
     }
 
     static async generateResponse(userMessage, conversationHistory = [], model) {
         const apiKey = process.env.GOOGLE_API_KEY;
-
         if (!apiKey) {
             console.error('Error: GOOGLE_API_KEY is not set');
             throw new Error('Missing API key.');
@@ -30,29 +36,17 @@ class GoogleAPI {
         }));
         contents.push({ role: 'user', parts: [{ text: userMessage }] });
 
-        try {
-            const response = await fetch(
-                `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-                {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ contents }),
-                }
-            );
-
-            if (!response.ok) {
-                const errorData = await response.json();
-                console.error('Google API error:', errorData);
-                throw new Error('Failed to get response from API.');
+        const response = await fetchWithErrorHandling(
+            `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ contents }),
             }
+        );
 
-            const responseData = await response.json();
-            return responseData.candidates[0].content.parts[0].text;
-
-        } catch (error) {
-            console.error('Network or fetch error:', error.message);
-            throw new Error('Failed to get response from API.');
-        }
+        if (!response.candidates?.[0]?.content?.parts?.[0]?.text) throw new Error('Failed to get response from API.');
+        return response.candidates[0].content.parts[0].text;
     }
 }
 
